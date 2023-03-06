@@ -1,0 +1,188 @@
+---
+title: "NYPD Shooting Incident Data (Historic) Review"
+author: "Binyam M. Shiferaw"
+date: "**Last updated on:** `r format(Sys.time(), '%a, %b %d %Y')`"
+output:
+  prettydoc::html_pretty:
+    theme: leonids
+    highlight: github
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Data Analysis of NYPD Shooting Incident dataset using R Markdown
+
+
+## Required Libraries for R Markdown, Data Wrangling, and Visualization
+
+**The following libraries are required to reproduce the analysis and result**
+
+__knitr and rmarkdown are required for rendering R code to html output file__
+
+* Data visualization
+    + ggplot2
+* Data wrangling
+    + tidyverse
+    + lubridate
+* R markdown
+  + rmarkdown
+  + knit
+  
+```{r message=FALSE}
+library(knitr)
+library(rmarkdown)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+```
+
+## Loading Data
+```{r data, message = FALSE}
+
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+nypd_shooting_data <- read_csv(url_in)
+```
+## Backgorund
+
+The data set lists every shooting incident in NYC from January 1, 2006, through December 31, 2021, including demographic data on suspects and victims. The data is manually extracted every quarter and reviewed by the Office of Management Analysis and Planning before being posted on the NYPD website. Which in turn gives credibility to the data set and conclusions we draw from it.
+
+## Review Objective and Questions
+
+The main objective of this review is to assess which group is the most vulnerable in shooting incidences, as identified by victims' race, age, and gender. Further, I want to evaluate if these identifiers are good predictors of being a victim of a shooting incident in New York that resulted in fatality. Hence, the review has tackled the following specific questions to address this objective:
+
+NOTE: I have left the R-code (i.e., Echo set to TRUE by default) as part of the report to make reviewing the analysis easier for my peers. 
+
+1. Is there a specific race more vulnerable to shooting incidents in New York?
+2. Are specific age and gender groups in the black community more vulnerable to shooting incidents in New York?
+3. Are black communities living in a given borough of New York more vulnerable to shooting incidents in New York?
+4. Can age, race, and sex of individuals predict fatality from a shooting incident in New York?
+
+
+## Clean-up and Transformation 
+
+```{r data-review-before-cleanup}
+head(nypd_shooting_data)
+```
+
+The NYPD Shooting Incident data set has several columns; some are not important for the study in this review. Hence, we will start by removing unneeded columns and as well changing the OCCUR_DATE column into a date object:
+
+
+```{r data-cleaning }
+nypd_shooting_data_clean  <- nypd_shooting_data %>%
+select(-c(INCIDENT_KEY, JURISDICTION_CODE, LOCATION_DESC, PERP_AGE_GROUP, PERP_SEX, PERP_RACE, X_COORD_CD, Y_COORD_CD, Latitude, Longitude, Lon_Lat)) %>%
+mutate(OCCUR_DATE = mdy(OCCUR_DATE))
+
+summary(nypd_shooting_data_clean)
+
+```
+
+The data set has **25596 ** shooting incidents, and we should note that there are no missing data points in the columns the review selected for analysis. Hence further actions are optional to handle missing values. The same can be checked using lapply function as follows:
+
+```{r }
+lapply(nypd_shooting_data_clean, function(x) sum(is.na(x)))
+```
+
+
+## Visualization and Analysis
+
+As the objective given above is a broad proposition, we will try to answer specific questions to make the analysis manageable:
+
+_**Question 1:** Is there a specific race more vulnerable to shooting incidents in New York?_
+
+```{r shooting-incident-by-race, fig.align="center", fig.width = 14, fig.height=7}
+
+shooting_incident_by_race_chart <- ggplot(nypd_shooting_data_clean, aes(x = VIC_RACE)) + geom_bar() +
+labs(title = "Shooting Cases in New York by Races", x = "Races", y = "Number of Shooting Incidents")
+
+shooting_incident_by_race_chart
+```
+
+The above chart clearly shows that the proportion of black victims in shooting incidents in New York is large compared to other races, followed (although not closely) by White-Hispanics and Black-Hispanics, in that order.
+
+We could also run a summary table to see the percentage composition of shooting incidents by race for more clarity(I have segregated the data by murder flag to see if the high proportion of black victims also holds for those incidents resulting in death):
+
+```{r table-shooting-incident-by-race}
+table(nypd_shooting_data_clean$VIC_RACE, nypd_shooting_data_clean$STATISTICAL_MURDER_FLAG)
+```
+The table clearly shows a positive correlation between the number of incidents and deaths. Hence, to get a deeper view, let us filter and focus on the data filtered for the "Black" race. With this filter data, our focus will be to see if specific age and gender groups are affected more than others in the black community affected by shooting incidents.  
+
+```{r shooting-incident-by-race-black}
+shooting_incident_by_race_black <- nypd_shooting_data_clean %>% filter(nypd_shooting_data_clean$VIC_RACE == "BLACK")
+
+```
+_**Question 2:** Are specific age and gender groups in the black community more vulnerable to shooting incidents in New York?_
+
+```{r shooting-incident-by-race-black_age_and_gender, fig.align="center", fig.width = 14, fig.height=7}
+
+shooting_incident_black_age_chart <- ggplot(shooting_incident_by_race_black, aes(x = VIC_AGE_GROUP)) + geom_bar() +
+labs(title = "Shooting Cases in New York in Black community by Age", x = "Age Group", y = "Number of Shooting Incidents")
+
+shooting_incident_black_gender_chart <- ggplot(shooting_incident_by_race_black, aes(x = VIC_SEX)) + geom_bar() +
+labs(title = "Shooting Cases in New York in Black community by Sex", x = "Sex Group", y = "Number of Shooting Incidents")
+
+shooting_incident_black_age_chart
+shooting_incident_black_gender_chart
+```
+
+The above two figures indicate that, in the black community, Male victims between the age of 18 and 44 are primarily affected compared to other gender and age groups. This could be an, albeit not definitive (a further detail analysis would be required not warranted by the assignment), indicator that gender, race, and age could be a good predictor of shooting incident victims in New York City.  
+
+_**Question 3:** Are black communities living in a given borough of New York more vulnerable to shooting incidents in New York?_
+
+Although the review did not propose boroughs as a predictor in the main objective, it would be interesting to see if a black person living in a specific borough makes them more vulnerable to being a victim of a shooting incident.  
+
+```{r shooting-incident-by-race-black_borough, fig.align="center", fig.width = 14, fig.height=7}
+
+shooting_incident_black_borough_chart <- ggplot(shooting_incident_by_race_black, aes(x = BORO)) + geom_bar() +
+labs(title = "Shooting Cases in New York in Black community by Borough", x = "Borough", y = "Number of Shooting Incidents")
+
+shooting_incident_black_borough_chart
+```
+
+The data shows black individuals living in Brooklyn are more like to be a victim of a shooting incident compared to other boroughs. 
+
+## Modeling
+_**Question 4:** Can age, race, and sex of individuals predict fatality from a shooting incident in New York?_
+
+The above analysis indicates that black males between 18 and 44 are highly impacted by shooting incidents in New York compared to other groups. We have also seen that death rates follow the same pattern, hence a more significant number of deaths in the same class of black individuals.  
+
+In this small model, we are going to evaluate if race, sex, and age can predict the number of fatalities in New York shooting incidents through logistic regression:   
+
+```{r fatality-prediction-model}
+# Fit the model
+fatality_prediction_model <- glm(STATISTICAL_MURDER_FLAG ~ VIC_AGE_GROUP + VIC_SEX + VIC_RACE, data = nypd_shooting_data_clean, family = binomial)
+
+# Summarize the model
+summary(fatality_prediction_model)
+           
+```
+
+Hence, we can see that age of a victim is a well-fit predictor of fatality from a shooting incident, where those that are young (for example, 18-24 with a coefficient of  0.27473) show less likelihood of death compared to those over age 65 (with a coefficient of 1.07254). However, once accounting for unknown races, ages, and sex, a victim's sex and race seem to have little value in predicting death due to being a victim in a shooting incident. For example, in a comparison within the three most significant races of victims in the data set, we see little difference between blacks (coefficient of 11.00535), Black-Hispanics (coefficient of 11.38440), and White-Hispanics (coefficient of 11.13785).
+
+
+## Pitfalls and Mitigation
+
+As I started the analysis, I knew that young black New Yonkers in predominantly black communities are disproportionately affected by shooting incidents. I also expected the Bronx to have more shooting incidents than other boroughs and for shooting incidents to result in many deaths in the black community. I mitigated my biases by focusing on what the data showed. For example, contrary to my expectation, I saw that Brooklyn has more shooting incidents than Bronx or Queens. I also concluded that despite many black victims in shooting incidents, the number of fatalities following a similar pattern (and lower than expected) in all races was clear. 
+
+
+
+## Conclusion
+
+We can conclude that shooting incident data in New York shows that age, race, and sex are good predictors of the vulnerability of specific communities to an incident, where male, black individuals between the ages of 18 and 44 are at the most risk. The review also showed only age is a good fit in predicting fatalities from such incidents, where the impact of sex and race is not apparent. 
+
+
+## Further questions to investigate resulting from the above analysis
+1. Does the age and gender results also hold to the whole data set and further to specific race groups such as "BLACK HISPANIC" and "WHITE HISPANIC" groups (i.e., those with the second and third highest shooting incident rates)
+2. Given the number of incidents that differ by boroughs, are specific precincts affected more than others?
+3. We could also analyze borough and precinct-level data to see if specific race, age, and gender groups are more affected by shooting incidents in the boroughs and precincts of New York. 
+4. Analysis could be done to see if specific dates and times of day (for example, non-work days and late evenings) account for many shooting incidents compared to other days and times.
+
+
+
+## Session Details
+```{r}
+sessionInfo()
+```

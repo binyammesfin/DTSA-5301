@@ -1,0 +1,301 @@
+---
+title: "Final Project 2: COVID19 Data Analysis"
+author: "Binyam M. Shiferaw"
+date: "**Last updated on:** `r format(Sys.time(), '%a, %b %d %Y')`"
+output:
+  prettydoc::html_pretty:
+    theme: leonids
+    highlight: github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data Analysis on Covid-19 data from John Hopkins
+
+## Introduction
+This report uses the COVID-19 Data Repository by Johns Hopkins University's Center for Systems Science and Engineering (CSSE) to analyze and visualize the impact of the pandemic on African nations. The data was also used to develop a model that explores the relationship between COVID-19 vaccination rates in Africa and death rates in Africa.
+
+## Data Sources   
+The data source is the COVID-19 Data Repository by Johns Hopkins University's Center for Systems Science and Engineering (CSSE). The repository presents data sets on US and global confirmed cases and confirmed deaths, with an additional list on global recovery. 
+
+The Center for Systems Science and Engineering (CSSE) is a research collective housed within the Department of Civil and Systems Engineering (CaSE) at Johns Hopkins University (JHU). The faculty, researchers, and students work on complex and interdisciplinary problems, united by the goal of better understanding and improving societal, health, and technological systems for everyone (https://systems.jhu.edu/).
+
+  + https://github.com/CSSEGISandData/COVID-19/tree/master/csse_covid_19_data/csse_covid_19_time_series 
+  
+To perform continent wise analysis, we will use the ISO countries with Regional Code look up table:
+
+  + https://github.com/lukes/ISO-3166-Countries-with-Regional-Codes/blob/master/all/all.csv
+  
+The model uses age data for all countries to assess the link between how young the population of a country is and covid cases and deaths. However, since the data cannot be imported directly from the Our World in Data website, it was downloaded to the same folder as the rmd file for analysis(I have uploaded the CSV file to github with the RMD file for reproducibility)
+
++ Global median age by country
+  + https://ourworldindata.org/age-structure
+
+## Data Set
+
+The data set lists all countries' daily confirmed cases, deaths, and recoveries regarding the COVID-19 pandemic, covering from 1/22/2020 to 3/3/2023. The data set also provides a population look up table, which will be merged to aid the analysis. 
+
+## Review Objective and Questions
+
+NOTE: I have left the R-code (i.e., Echo set to TRUE by default) as part of the report to make reviewing the analysis easier for my peers. 
+
+There have been reports that the pandemic's impact in Africa remains markedly lower compared to the Americas, Europe, and Asia. The main objective of this review is to assess if the data support such an observation and if the age of the population could be one factor in the lower impact of the pandemic. More specifically, the review tried to tackle the following questions:
+
+1. Did Africa have a lower number of COVID-19 cases compared to the Americas, Europe, and Asia?
+2. Did Africa have a lower number of deaths per number of confirmed cases compared to the Americas, Europe, and Asia?
+3. Is there difference in number of confirmed cases of COVID-19 among African countries?
+4. MODEL: Does country's population median age predict the number of confirmed COVID-19 cases and deaths in a country?
+
+
+## Environment Set-up, Analysis and Visualization Process
+
+### 1). R libraries set-up
+
+**The following libraries required to reproduce the analysis and results. "prettydoc" was used for html formatting!**
+
+* Data visualization
+    + ggplot2
+    + patchwork
+* Data wrangling
+    + tidyverse
+    + lubridate
+* R markdown and output formatting
+  + prettydoc
+  + rmarkdown
+  + knit
+  
+  
+```{r r_setup, message=FALSE}
+# Import libraries
+library(knitr)
+library(rmarkdown)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(prettydoc)
+library(patchwork)
+```
+
+### 2). Import and loading data
+_Importing global data only, although the repo provides separate data on the US_
+```{r import_data, message = FALSE}
+# URL set-up
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+filenames <- c("time_series_covid19_confirmed_global.csv", "time_series_covid19_deaths_global.csv", "time_series_covid19_recovered_global.csv")
+urls <- str_c(url_in, filenames)
+
+# Import COVID-19 data
+global_cases <- read_csv(urls[1])
+global_deaths <- read_csv(urls[2])
+global_recovered <- read_csv(urls[3])
+
+#Import UID data from CSSE to be used as a transition to add Region/Continent
+uid_lookup_url <- 'https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv'
+uid <- read_csv(uid_lookup_url) %>% select(-c(Lat, Long_, Combined_Key, code3, Admin2))
+
+# Import region look-up table to add Region/Continent to the data set
+region_lookup_url <- "https://raw.githubusercontent.com/lukes/ISO-3166-Countries-with-Regional-Codes/master/all/all.csv"
+
+uid_region <- read_csv(region_lookup_url)
+
+# Import median age data for use in model 
+median_age <- read.csv("median-age.csv")
+```
+
+### 3). Tidy and transform data
+```{r tidy_transform_data, message=FALSE}
+# Step 1: PIVOT TABLES - Global Cases and Global Deaths: with 'Province/State' and 'Country/Region' as factors, and pivot dates as rows
+global_cases <- mutate_at(global_cases, vars('Province/State', 'Country/Region'), as.factor) %>%	pivot_longer(cols = -c('Province/State', 'Country/Region', 'Lat', 'Long'), names_to = 'Date', values_to = 'Cases') %>% select(-c('Lat', 'Long'))
+
+
+global_deaths <- mutate_at(global_deaths, vars('Province/State', 'Country/Region'), as.factor) %>% pivot_longer(cols = -c('Province/State', 'Country/Region', 'Lat', 'Long'), names_to = 'Date', values_to = 'Deaths') %>% select(-c('Lat', 'Long'))
+
+# Step 2: Merge global_cases and global_deaths into one global data frame, and mutate "Date" field into a date object
+global <- global_cases %>% full_join(global_deaths) %>% mutate(Date = mdy(Date))
+
+# Step 3: View the first few rows for validation
+head(global)
+
+# Step 4: Rename column for ease of reference and create a combined key column to be used for merging
+global <- global %>% rename(Country_Region = 'Country/Region', Province_State = 'Province/State') %>% unite('Combined_Key',	c(Province_State, Country_Region), sep = ', ', na.rm = TRUE, remove = FALSE)
+
+
+# Step 5: Join 'global' uid look up table and select only needed columns
+global <- global %>% left_join(uid, by = c('Province_State', 'Country_Region')) %>% select(-c(UID, FIPS)) %>% select(Province_State, Country_Region, Date, Cases, Deaths, Population, Combined_Key, iso2, iso3)
+
+# Step 6: Get continent from region look up df, and rename the name column to country
+uid_region <- uid_region %>% select(c(name, region, "alpha-2", "alpha-3")) %>% rename(Country = "name", iso2 = "alpha-2", iso3 = "alpha-3")
+
+# Step 7: Merge global and regional look up data based on ISO keys
+global <- global %>% left_join(uid_region, by = c("iso2", "iso3"))
+
+# step 8: get the 2020 median age of all countries and merge with the global df from step 7. 2020 was chosen to capture the population structure when the pandemic started
+median_age <- median_age %>% filter(Year == "2020") %>% rename(iso3 = "Code")
+
+global <- global  %>% left_join(median_age, by = c("iso3"))
+
+head(median_age)
+
+# # Step 9: With merging complete, remove columns used for the role
+global <- global %>% select(-c(Province_State, iso2, iso3, Combined_Key, Country)) %>% rename(Country = "Country_Region", Region = "region")
+
+
+head(global)
+```
+
+
+### 3). Analysis and Visualization
+The first question we will need to answer is if Africa indeed had lower cases of COVID-19 compared to the other continents:
+
+*Question 1:* Did Africa have a lower number of COVID-19 cases compared to the Americas, Europe, and Asia?
+*Question 2:* Did Africa have a lower number of deaths per number of confirmed cases compared to the Americas, Europe, and Asia?
+```{r analysis_visualization_data, message=FALSE, fig.width = 14}
+# Step 1: aggregate data by continent, country and date, since daily cases are cumulative, we take the max for each country
+global_by_country <- global %>% group_by(Region, Country, Date) %>% summarize(Total_Cases = max(Cases), Total_Deaths = max(Deaths)) %>% arrange(desc(Total_Cases))
+
+head(global_by_country)
+
+# Step 2: aggregate data by continent and date
+global_by_region <- global_by_country %>% group_by(Region, Date) %>% summarize(Total_Region_Cases = sum(Total_Cases), Total_Region_Deaths = sum(Total_Deaths))
+
+head(global_by_region)
+
+# Step 3: Plot a histogram to compare total cases by Continent
+global_by_region_chart_1 = ggplot(global_by_region, aes(x = Date, y = Total_Region_Cases, color = Region)) + geom_line() + 
+  labs(x = "Continent", y = "Number of Confirmed Cases",
+       title = "Number of Confrimed Covid-19 Cases by Continent",
+       subtitle = "Daily Covid-19 Cases Until to March, 2023") + 
+  theme(panel.grid.major = element_line(size = .5, linetype = "dashed"),
+        panel.grid.minor = element_line(size = .25, linetype = "dotted"),
+        panel.grid.major.x = element_line(color = "red1"),
+        panel.grid.major.y = element_line(color = "blue1"),
+        panel.grid.minor.x = element_line(color = "red4"),
+        panel.grid.minor.y = element_line(color = "blue4"))
+
+global_by_region_chart_2 = ggplot(global_by_region, aes(x = Date, y = Total_Region_Deaths, color = Region)) + geom_line() + 
+  labs(x = "Continent", y = "Number of Confirmed Cases",
+       title = "Number of Confrimed Covid-19 Cases by Continent",
+       subtitle = "Daily Covid-19 Cases Until to March, 2023") + 
+  theme(panel.grid.major = element_line(size = .5, linetype = "dashed"),
+        panel.grid.minor = element_line(size = .25, linetype = "dotted"),
+        panel.grid.major.x = element_line(color = "red1"),
+        panel.grid.major.y = element_line(color = "blue1"),
+        panel.grid.minor.x = element_line(color = "red4"),
+        panel.grid.minor.y = element_line(color = "blue4"))
+
+# The side by side charts require the patchwork library
+global_by_region_chart_1 + global_by_region_chart_2
+```
+
+We can see from the above analysis that both the number of confirmed cases and deaths in Africa stayed lower than those in Americas, Europe and Asia from the start of the pandemic.
+
+
+*Question 3:* Is there difference in number of confirmed cases of COVID-19 among African countries?
+
+After establishing that COVID-19 cases and deaths were lower in Africa, let us review how cases and deaths differ among countries in Africa. 
+
+
+```{r analysis_visualization_data_2, message=FALSE, fig.width = 14}
+# Step 4: Plot a line chart to compare total deaths by Continent
+global_by_country_africa <- global_by_country %>% filter(Region == "Africa") %>% group_by(Country) %>% summarize(Total_Country_Cases = max(Total_Cases), Total_Country_Deaths = max(Total_Deaths)) %>% arrange(desc(Total_Country_Cases))
+
+global_by_country_africa
+
+
+# Step 5: Plot a histogram of cases and deaths for all countries 
+global_by_region_chart_3 <- ggplot(global_by_country_africa, aes(x = reorder(Country, +Total_Country_Cases), 
+  y = Total_Country_Cases,
+  fill = Total_Country_Cases)) +
+  scale_fill_viridis_c(option = "magma") +
+  geom_bar(stat = "identity") +
+  labs(x = "Country",
+      y = "# COVID-19 Cases",
+      title = "Africa COVID-19 Cases by Country") +
+  theme(legend.position="none", axis.text.x=element_text(angle=90, hjust=.98, vjust = .5))
+
+
+global_by_region_chart_4 <- ggplot(global_by_country_africa, aes(x = reorder(Country, +Total_Country_Deaths), 
+  y = Total_Country_Deaths,
+  fill = Total_Country_Deaths)) +
+  scale_fill_viridis_c(option = "magma") +
+  geom_bar(stat = "identity") +
+  labs(x = "Country",
+      y = "# COVID-19 Deaths",
+      title = "Africa COVID-19 Deaths by Country") +
+  theme(legend.position="none", axis.text.x=element_text(angle=90, hjust=.98, vjust = .5))
+
+global_by_region_chart_3
+global_by_region_chart_4
+
+```
+The above charts show that a few countries in Africa accounted for the highest confirmed cases and deaths due to COVID-19. Primarily, South Africa, Tunisia, Egypt, and Morocco are affected much more than other African countries. 
+
+### 4). MODEL
+Given that countries in the World were affected differently by the COVID-19 pandemic, this model will assess if we can use population median age (or how relatively young a country's population is) to predict the number of confirmed cases and deaths of COVID-19. For this model, a simple linear regression is used to assess if there is a statistically significant relationship between a country's median age and the number of confirmed cases/deaths a country reports.      
+
+```{r global_model_population_median-age, message=FALSE, warning=FALSE, fig.width = 14, fig.height=14}
+global_by_country_with_age <- global %>% group_by(Region, Country) %>% summarize(Total_Cases = max(Cases), Total_Deaths = max(Deaths), Median_Age = max(Median_Age)) %>% arrange(desc(Total_Cases))
+
+head(global_by_country_with_age)
+
+ggplot(global_by_country_with_age , aes(x = Median_Age, y = Total_Cases, label = Country)) +
+    geom_point(size = .4) +
+    geom_text(size = 1.7, vjust = .5, hjust = -.1) +
+    geom_smooth(method = "lm") +
+    labs(x = "Median Age",
+         y = "Total Number of Confirmed Cases",
+         title = "Global COVID-19 Cases / Median Age - Linear Model",
+         subtitle = "By Country")
+
+ggplot(global_by_country_with_age , aes(x = Median_Age, y = Total_Deaths, label = Country)) +
+    geom_point(size = .4) +
+    geom_text(size = 1.7, vjust = .5, hjust = -.1) +
+    geom_smooth(method = "lm") +
+    labs(x = "Median Age",
+         y = "Total Number of Confirmed Deaths",
+         title = "Global COVID-19 Deaths / Median Age - Linear Model",
+         subtitle = "By Country")
+
+```
+As the regression graph above shows, although there are outliers such as India and Turkey, there is a positive relationship between how old a country's population is (as evaluated by median age) and the number of covid cases and deaths a country has. The older a country's population, the larger the number of cases and deaths. 
+
+Let us use the "lm" function and fit the above regression models to assess if there is a statistically significant relationship between a country's median age and the number of confirmed cases/deaths a country
+
+```{r, message=FALSE}
+mod_cases <- lm(Total_Cases ~ Median_Age, global_by_country_with_age)
+mod_deaths <- lm(Total_Deaths ~ Median_Age, global_by_country_with_age)
+summary(mod_cases)
+summary(mod_deaths)
+```
+
+Both the above summaries show that there is a statistically significant relationship between a country's median age and the number of confirmed cases/deaths a country, as given by the P-values using a 0.05 significance level. 
+
+
+## Conclusion
+This analysis shows that the impact of COVID-19 on the African continent was much lower than in the Americas, Europe, and Asia, as evidenced by the lower number of COVID-19 cases and deaths.  Most experts agree the relatively young population of Africa was a significant factor in lowering the impact, which is supported by the simple regression model in this review that showed there is a statistically significant relationship between a country's median age and the number of confirmed cases/deaths a country
+
+## Potential Bias
+There are potentially two biases in the report. The first is that although the analysis shows that the number of cases and deaths in Africa was lower than Americas, Europe, and Asia, there is an excellent chance that those continents would have a better recording and reporting platform for COVID-19 incidents compared to African countries. This might have underestimated the confirmed cases and deaths in Africa. Second,  the simple regression model only considers median age as an independent variable, while multiple factors could account for the difference in the impact of COVID-19 among countries. 
+
+
+## Further questions to investigate resulting from the above analysis
+1. Considering additional factors in the model and doing further analysis to understand the impact of the difference in these factors among countries on the number of cases/deaths (focusing on those countries with a higher number of cases/deaths such as the US, India, France, Turkey, etc.) 
+
+## Session Details
+```{r}
+sessionInfo()
+```
+
+
+
+
+
+
+
+
+
+
+
+
